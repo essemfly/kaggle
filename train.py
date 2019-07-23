@@ -1,22 +1,28 @@
-import numpy as np
 import pandas as pd
 import time
 import os
 import copy
+
+# import sys
+# package_dir = "../input/pretrained-models/pretrained-models/pretrained-models.pytorch-master/"
+# sys.path.insert(0, package_dir)
+
 import pretrainedmodels
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
-from preprocess import data_transforms
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 
 from tqdm.auto import tqdm
 from PIL import Image, ImageFile
 
 device = torch.device("cuda:0")
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+# DATA_PATH = "../input/aptos2019-blindness-detection/"
+DATA_PATH = "./"
 
 
 class RetinoDataset(Dataset):
@@ -28,7 +34,7 @@ class RetinoDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        img_name = os.path.join('./train_images',
+        img_name = os.path.join(DATA_PATH + 'train_images',
                                 self.data.loc[idx, 'id_code'] + '.png')
         image = Image.open(img_name)
         image = self.transform(image)
@@ -36,12 +42,33 @@ class RetinoDataset(Dataset):
         return image, label
 
 
-total_trainset = RetinoDataset("./train.csv", transform=data_transforms["train"])
+data_transforms = {
+    'train': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+    'train_old': transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+    'test': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+}
 
-train_dataset, valid_dataset = torch.utils.data.random_split(total_trainset, [2562, 1100])
+total_trainset = RetinoDataset(DATA_PATH + "train.csv", transform=data_transforms["train"])
+
+train_dataset, valid_dataset = torch.utils.data.random_split(total_trainset, [3262, 400])
 
 train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=4)
-valid_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=4)
+valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=False, num_workers=4)
 
 dataset_sizes = [len(train_dataset), len(valid_dataset)]
 
@@ -80,34 +107,26 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
             running_loss += loss.item() * inputs.size(0)
         epoch_loss = running_loss / dataset_sizes[0]
 
-        # running_corrects = 0
-        # valid_preds = np.zeros((len(valid_dataset), 1))
+        model.eval()
 
-        # model.eval()
-        #
-        # for i, batch in enumerate(tqdm(valid_dataloader)):
-        #     inputs = batch[0]
-        #     labels = batch[1]
-        #     inputs = inputs.to(device)
-        #     labels = labels.view(-1, 1)
-        #     labels = labels.to(device)
-        #
-        #     outputs = model(inputs)
-        #     loss = criterion(outputs, labels)
-        #     optimizer.step()
-        #
-        #     valid_loss += loss.item() * inputs.size(0)
+        for i, batch in enumerate(tqdm(valid_dataloader)):
+            inputs = batch[0]
+            labels = batch[1]
+            inputs = inputs.to(device)
+            labels = labels.view(-1, 1)
+            labels = labels.to(device)
 
-            # valid_preds[i * 32:(i + 1) * 32] = pred.detach().cpu().squeeze().numpy().ravel().reshape(-1, 1)
-            # running_corrects += np.sum(pred == labels.data)
-        # epoch_valid_loss = valid_loss / dataset_sizes[1]
+            with torch.no_grad():
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
 
-        # print('Loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
-        print('Train Loss: {:.4f}, '.format(epoch_loss))
-        # print('Train Loss: {:.4f}, Valid Loss: {:.4f}'.format(epoch_loss, epoch_valid_loss))
+            valid_loss += loss.item() * inputs.size(0)
+        epoch_valid_loss = valid_loss / dataset_sizes[1]
 
-        if best_loss == -1 or epoch_loss < best_loss:
-            best_loss = epoch_loss
+        print('Train Loss: {:.4f}, Valid Loss: {:.4f}'.format(epoch_loss, epoch_valid_loss))
+
+        if best_loss == -1 or epoch_valid_loss < best_loss:
+            best_loss = epoch_valid_loss
             best_model_wts = copy.deepcopy(model.state_dict())
 
     time_elapsed = time.time() - since
