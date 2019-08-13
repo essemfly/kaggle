@@ -1,5 +1,11 @@
 test_images/
 train_images/
+train_
+test_avg_images/
+test_avg_light_images/
+test_light_images/
+test_channel_images/
+image_processing_utils/
 .idea
 *.pyc
 *.pth

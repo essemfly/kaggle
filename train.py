@@ -1,7 +1,10 @@
+import numpy as np
 import pandas as pd
 import time
 import os
 import copy
+import sys
+import cv2
 
 # import sys
 # package_dir = "../input/pretrained-models/pretrained-models/pretrained-models.pytorch-master/"
@@ -15,13 +18,14 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+from contrast_enhance import *
 
 from tqdm.auto import tqdm
 from PIL import Image, ImageFile
 
-device = torch.device("cuda:0")
+device = torch.device("cpu")
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-# DATA_PATH = "../input/aptos2019-blindness-detection/"
+
 DATA_PATH = "./"
 
 
@@ -36,32 +40,14 @@ class RetinoDataset(Dataset):
     def __getitem__(self, idx):
         img_name = os.path.join(DATA_PATH + 'train_images',
                                 self.data.loc[idx, 'id_code'] + '.png')
-        image = Image.open(img_name)
+        image = cv2.imread(img_name)
+        image = clahe_channel(image)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(image)
         image = self.transform(image)
         label = torch.tensor(self.data.loc[idx, 'diagnosis'], dtype=torch.float)
         return image, label
 
-
-data_transforms = {
-    'train': transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-    'train_old': transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-    'test': transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-}
 
 total_trainset = RetinoDataset(DATA_PATH + "train.csv", transform=data_transforms["train"])
 
@@ -158,12 +144,12 @@ def run():
     optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
 
-    model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler, num_epochs=25)
+    model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler, num_epochs=30)
 
     checkpoint = {
         'state_dict': model_ft.state_dict(),
         'optimizer': optimizer_ft.state_dict()}
-    torch.save(checkpoint, './aptos_resnet_checkpoint.pth')
+    torch.save(checkpoint, './aptos_resnet_checkpoint_contrast_0726.pth')
 
     return True
 
